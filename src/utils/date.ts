@@ -47,7 +47,34 @@ export function parseFlexibleDate(input: any): Date | null {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  // Fallback: tentar Date nativo (ISO, etc.)
+// Fallback: tentar Date nativo (ISO, etc.)
   const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
+}
+
+// Calcula dias úteis e conta fins de semana entre duas datas
+export function calculateBusinessDaysWithWeekendInfo(startDate: Date, endDate: Date): { businessDays: number; weekendDays: number } {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  // Garantir que start é anterior a end
+  if (start > end) {
+    [start.setTime(end.getTime()), end.setTime(start.getTime())];
+  }
+  
+  let businessDays = 0;
+  let weekendDays = 0;
+  const current = new Date(start);
+  
+  while (current <= end) {
+    const dayOfWeek = current.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday (0) or Saturday (6)
+      weekendDays++;
+    } else {
+      businessDays++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return { businessDays, weekendDays };
 }
