@@ -6,7 +6,7 @@ import { ArrowUp, ArrowDown, Copy, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { differenceInBusinessDays } from 'date-fns';
 import { getPrazoByCidade } from '@/utils/prazosEntrega';
-import { parseFlexibleDate, calculateBusinessDaysWithWeekendInfo } from '@/utils/date';
+import { parseFlexibleDate } from '@/utils/date';
 import { findRequiredColumns } from '@/utils/columnUtils';
 import CtrcDetailDialog from './CtrcDetailDialog';
 
@@ -43,16 +43,10 @@ const UnidadeDetailDialog: React.FC<UnidadeDetailDialogProps> = ({
   codigo
 }) => {
   // Função para formatar prazos
-  const formatPrazo = (dias: number, weekendDays?: number): string => {
+  const formatPrazo = (dias: number): string => {
     if (dias === 0) return 'Chegou Hoje';
-    
-    const diasText = dias === 1 ? '1 dia' : `${dias} dias`;
-    
-    if (weekendDays && weekendDays > 0) {
-      return `${diasText} (+${weekendDays})`;
-    }
-    
-    return diasText;
+    if (dias === 1) return '1 dia';
+    return `${dias} dias`;
   };
 
   const [ctrcDialogOpen, setCtrcDialogOpen] = useState(false);
@@ -171,9 +165,8 @@ const UnidadeDetailDialog: React.FC<UnidadeDetailDialogProps> = ({
         let prazoIdeal = 'N/A';
         
         if (previsaoDate && manifestoDate) {
-          const { businessDays, weekendDays } = calculateBusinessDaysWithWeekendInfo(manifestoDate, previsaoDate);
-          const totalDays = businessDays + weekendDays;
-          prazoCalculado = formatPrazo(businessDays, weekendDays);
+          const diferencaDias = Math.ceil((previsaoDate.getTime() - manifestoDate.getTime()) / (1000 * 60 * 60 * 24));
+          prazoCalculado = formatPrazo(diferencaDias);
         }
         
         // Buscar prazo ideal da cidade
