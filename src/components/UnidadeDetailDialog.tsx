@@ -6,7 +6,7 @@ import { ArrowUp, ArrowDown, Copy, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { differenceInBusinessDays } from 'date-fns';
 import { getPrazoByCidade } from '@/utils/prazosEntrega';
-import { parseFlexibleDate } from '@/utils/date';
+import { parseFlexibleDate, hasWeekendsInRange } from '@/utils/date';
 import { findRequiredColumns } from '@/utils/columnUtils';
 import CtrcDetailDialog from './CtrcDetailDialog';
 
@@ -163,10 +163,12 @@ const UnidadeDetailDialog: React.FC<UnidadeDetailDialogProps> = ({
         
         let prazoCalculado = 'Dados inválidos';
         let prazoIdeal = 'N/A';
+        let temFimDeSemana = false;
         
         if (previsaoDate && manifestoDate) {
           const diferencaDias = Math.ceil((previsaoDate.getTime() - manifestoDate.getTime()) / (1000 * 60 * 60 * 24));
           prazoCalculado = formatPrazo(diferencaDias);
+          temFimDeSemana = hasWeekendsInRange(manifestoDate, previsaoDate);
         }
         
         // Buscar prazo ideal da cidade
@@ -179,7 +181,8 @@ const UnidadeDetailDialog: React.FC<UnidadeDetailDialogProps> = ({
           prazo: prazoCalculado,
           cidade: cidade,
           prazoIdeal: prazoIdeal,
-          ctrc: item[columns.ctrc] || 'N/A'
+          ctrc: item[columns.ctrc] || 'N/A',
+          temFimDeSemana: temFimDeSemana
         };
       });
 
@@ -191,13 +194,18 @@ const UnidadeDetailDialog: React.FC<UnidadeDetailDialogProps> = ({
           const existing = groupedMap.get(key)!;
           existing.quantidade += 1;
           existing.ctrcs.push(record.ctrc);
+          // Se qualquer item do grupo tem fim de semana, o grupo inteiro deve ser marcado
+          if (record.temFimDeSemana) {
+            existing.temFimDeSemana = true;
+          }
         } else {
           groupedMap.set(key, {
             cidade: record.prazo, // Usar prazo no lugar de "cidade" para mostrar na primeira coluna
             ultimaAtualizacao: record.cidade, // Usar cidade no lugar de "ultima atualização"
             prazoIdeal: record.prazoIdeal, // Nova coluna com prazo ideal
             quantidade: 1,
-            ctrcs: [record.ctrc]
+            ctrcs: [record.ctrc],
+            temFimDeSemana: record.temFimDeSemana
           });
         }
       });
@@ -389,7 +397,7 @@ const UnidadeDetailDialog: React.FC<UnidadeDetailDialogProps> = ({
                     key={index} 
                     className={record.isAtrasado ? 'bg-red-50 border-red-200' : ''}
                   >
-                      <TableCell className={record.isAtrasado ? 'text-red-700 font-semibold' : ''}>{record.cidade}</TableCell>
+                      <TableCell className={`${record.isAtrasado ? 'text-red-700 font-semibold' : ''} ${codigo === 'semPrazo' && record.temFimDeSemana ? 'text-red-600' : ''}`}>{record.cidade}</TableCell>
                       <TableCell className={record.isAtrasado ? 'text-red-700 font-semibold' : ''}>{record.ultimaAtualizacao}</TableCell>
                       {codigo === 'semPrazo' && (
                         <TableCell className={record.isAtrasado ? 'text-red-700 font-semibold' : ''}>{record.prazoIdeal}</TableCell>

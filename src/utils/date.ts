@@ -1,3 +1,27 @@
+// Verifica se há fins de semana (sábado e domingo) entre duas datas
+export function hasWeekendsInRange(startDate: Date, endDate: Date): boolean {
+  let start = new Date(startDate);
+  let end = new Date(endDate);
+  
+  // Garantir que start seja anterior a end
+  if (start > end) {
+    [start, end] = [end, start];
+  }
+  
+  const current = new Date(start);
+  
+  while (current <= end) {
+    const dayOfWeek = current.getDay();
+    // 0 = domingo, 6 = sábado
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return true;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return false;
+}
+
 // Utilitário de parsing de datas flexível para formatos brasileiros e ISO
 // Retorna null quando não conseguir parsear
 export function parseFlexibleDate(input: any): Date | null {
