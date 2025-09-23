@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { differenceInBusinessDays } from 'date-fns';
 import FileUploader, { ProcessedData } from '@/components/FileUploader';
 import ResultsTable from '@/components/ResultsTable';
 import ResultsChart from '@/components/ResultsChart';
@@ -210,14 +211,13 @@ const Index: React.FC = () => {
         const unidadeReceptora = item[unidadeReceptoraKey] || unidade;
 
         if (previsaoDate && manifestoDate) {
-          const delta = Math.floor((previsaoDate.getTime() - manifestoDate.getTime()) / (1000 * 60 * 60 * 24));
-          const diasCalculados = Math.abs(delta);
+          const delta = differenceInBusinessDays(previsaoDate, manifestoDate);
           
           // Buscar prazo ideal da cidade no banco de dados
           const prazoIdeal = getPrazoByCidade(cidade, unidadeReceptora);
           if (prazoIdeal !== null) {
             // Se chegou com menos dias que o prazo ideal ou depois da previsão, está atrasado
-            if (delta <= 0 || diasCalculados < prazoIdeal) {
+            if (delta <= 0 || Math.abs(delta) < prazoIdeal) {
               return true;
             }
           }
