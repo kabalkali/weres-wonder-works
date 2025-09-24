@@ -254,6 +254,9 @@ const Index: React.FC = () => {
     };
   }, [rawData, selectedUf, selectedUnidades, getPrazoByCidade, unidadesReceptoras]);
 
+  // Unidades que devem vir pré-selecionadas por padrão
+  const DEFAULT_SELECTED_UNITS = ['BLU', 'BNU', 'CCA', 'CHA', 'CRC', 'JCA', 'LGE', 'RDS', 'PLC', 'TBR'];
+
   const processFileData = (data: ProcessedData, columnName: string) => {
     setIsLoading(true);
     setRawData(data);
@@ -266,7 +269,29 @@ const Index: React.FC = () => {
     Object.values(meta.ufUnidades).forEach(unidades => {
       unidades.forEach(unidade => allUnidades.add(unidade));
     });
-    setUnidadesReceptoras(Array.from(allUnidades).sort());
+    const sortedUnidades = Array.from(allUnidades).sort();
+    setUnidadesReceptoras(sortedUnidades);
+    
+    // Verificar quais unidades padrão existem nos dados carregados
+    const availableDefaultUnits = DEFAULT_SELECTED_UNITS.filter(unit => 
+      sortedUnidades.includes(unit)
+    );
+    
+    // Se existir pelo menos uma unidade padrão, pré-selecioná-las
+    if (availableDefaultUnits.length > 0) {
+      setSelectedUnidades(availableDefaultUnits);
+      // Aplicar filtros com as unidades pré-selecionadas
+      setTimeout(() => {
+        filterData('todas', availableDefaultUnits);
+        if (activeTab === "ofensores") {
+          filterOfendersData('todas', availableDefaultUnits, columnName);
+        }
+      }, 100);
+    } else {
+      // Manter comportamento padrão se nenhuma unidade padrão existir
+      setSelectedUnidades(['todas']);
+    }
+    
     const unidadeCodes = mapUnidadeCodes(data.sample, columnName);
     setUnidadeCodesMap(unidadeCodes);
     processCodigoOcorrencias(meta.frequencyMap, meta.totalCount);
