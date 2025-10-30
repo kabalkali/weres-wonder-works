@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { differenceInBusinessDays } from 'date-fns';
 import FileUploader, { ProcessedData } from '@/components/FileUploader';
 import ResultsTable from '@/components/ResultsTable';
@@ -8,7 +8,7 @@ import PlacaTable from '@/components/PlacaTable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Filter, BarChart2, Table as TableIcon, FileText, ChevronDown, ChevronUp, Loader, Minimize, Truck, ListCheck, Eye, Info, Package, Users, AlertTriangle, Building2, Clock } from 'lucide-react';
+import { Filter, BarChart2, Table as TableIcon, FileText, ChevronDown, ChevronUp, Loader, Minimize, Truck, ListCheck, Eye, Info, Package, Users, AlertTriangle, Building2, Clock, RefreshCw, Share2 } from 'lucide-react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,8 @@ import { getPrazoByCidade } from '@/utils/prazosEntrega';
 import { parseFlexibleDate } from '@/utils/date';
 import { findRequiredColumns } from '@/utils/columnUtils';
 import UnidadeMetrics from '@/components/UnidadeMetrics';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 interface ResultData {
   code: string | number;
   count: number;
@@ -90,6 +92,8 @@ interface OfendersData {
 // Lista de códigos que devem ser pré-selecionados por padrão
 const DEFAULT_SELECTED_CODES = ['1', '6', '18', '23', '25', '26', '27', '28', '30', '33', '34', '46', '48', '50', '58', '59', '65', '67', '71', '75', '82', '97'];
 const Index: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const { toast } = useToast();
   const [results, setResults] = useState<ResultData[]>([]);
   const [filteredResults, setFilteredResults] = useState<ResultData[]>([]);
   const [totalRecords, setTotalRecords] = useState<number>(0);
@@ -112,6 +116,8 @@ const Index: React.FC = () => {
   const [uploadCollapsed, setUploadCollapsed] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("codigos");
   const [unidadeSearch, setUnidadeSearch] = useState<string>('');
+  const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
+  const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
 
   // Novo estado para dados de ofensores
   const [ofendersData, setOfendersData] = useState<OfendersData | null>(null);
@@ -257,7 +263,113 @@ const Index: React.FC = () => {
   // Unidades que devem vir pré-selecionadas por padrão
   const DEFAULT_SELECTED_UNITS = ['BLU', 'BNU', 'CCA', 'CHA', 'CRC', 'JCA', 'LGE', 'RDS', 'PLC', 'TBR'];
 
-  const processFileData = (data: ProcessedData, columnName: string) => {
+  // Carregar dados do Supabase ao montar o componente (se houver ID na URL)
+  useEffect(() => {
+    const uploadId = searchParams.get('upload');
+    if (uploadId && !rawData) {
+      loadFromSupabase(uploadId);
+    }
+  }, [searchParams]);
+
+  const loadFromSupabase = async (uploadId: string) => {
+    try {
+      setIsLoading(true);
+      
+      const { data, error } = await supabase
+        .from('uploaded_files')
+        .select('*')
+        .eq('id', uploadId)
+        .single();
+
+      if (error) {
+        console.error('Erro ao carregar do Supabase:', error);
+        toast({
+          title: "Erro ao carregar dados",
+          description: "Não foi possível carregar os dados compartilhados.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      if (data) {
+        // Reconstruir ProcessedData exatamente como era (com type assertions)
+        const rawDataArray = data.raw_data as any[];
+        const metadataObj = data.metadata as ProcessedData['meta'];
+        
+        const processedData: ProcessedData = {
+          sample: rawDataArray.slice(0, 100),
+          full: rawDataArray,
+          meta: metadataObj
+        };
+
+        setCurrentUploadId(uploadId);
+        setLoadedFileName(data.file_name);
+        
+        toast({
+          title: "Dados carregados!",
+          description: `${data.row_count.toLocaleString()} registros carregados de "${data.file_name}".`,
+        });
+
+        // Processar dados normalmente
+        processFileData(processedData, data.column_name);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar do Supabase:', error);
+      toast({
+        title: "Erro",
+        description: "Ocorreu um erro ao carregar os dados.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTrocarArquivo = async () => {
+    if (currentUploadId) {
+      // Deletar dados antigos do banco
+      const { error } = await supabase
+        .from('uploaded_files')
+        .delete()
+        .eq('id', currentUploadId);
+
+      if (error) {
+        console.error('Erro ao deletar upload antigo:', error);
+      }
+    }
+
+    // Limpar estados
+    setCurrentUploadId(null);
+    setLoadedFileName(null);
+    setRawData(null);
+    setResults([]);
+    setFilteredResults([]);
+    setPlacasData([]);
+    setFilteredPlacasData([]);
+    setHasResults(false);
+    setUploadCollapsed(false);
+    setSelectedUf('todas');
+    setSelectedUnidades(['todas']);
+    
+    // Remover parâmetro da URL
+    window.history.pushState({}, '', '/');
+    
+    toast({
+      title: "Pronto para novo upload",
+      description: "Os dados anteriores foram limpos. Faça upload de um novo arquivo.",
+    });
+  };
+
+  const handleShareLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    toast({
+      title: "Link copiado!",
+      description: "O link foi copiado para a área de transferência.",
+    });
+  };
+
+  const processFileData = (data: ProcessedData, columnName: string, fileName?: string, fileType?: string) => {
     setIsLoading(true);
     setRawData(data);
     const {
@@ -1493,6 +1605,50 @@ const Index: React.FC = () => {
         </div>
 
         <div className="grid gap-6">
+          {/* Botões de ação quando há dados carregados */}
+          {(hasResults || loadedFileName) && (
+            <Card className="border-blue-200 bg-blue-50/50">
+              <CardContent className="p-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline" className="bg-white">
+                      <FileText className="h-4 w-4 mr-2" />
+                      {loadedFileName || 'Arquivo carregado'}
+                    </Badge>
+                    {currentUploadId && (
+                      <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
+                        <Share2 className="h-3 w-3 mr-1" />
+                        Dados compartilháveis
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {currentUploadId && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={handleShareLink}
+                        className="gap-2"
+                      >
+                        <Share2 className="h-4 w-4" />
+                        Copiar Link
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={handleTrocarArquivo}
+                      className="gap-2"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Trocar Arquivo
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Collapsible open={!uploadCollapsed} onOpenChange={setUploadCollapsed}>
             <div className="flex items-center justify-between">
               <CollapsibleTrigger asChild>

@@ -415,6 +415,39 @@ export type Database = {
         }
         Relationships: []
       }
+      uploaded_files: {
+        Row: {
+          column_name: string
+          created_at: string
+          file_name: string
+          file_type: string
+          id: string
+          metadata: Json
+          raw_data: Json
+          row_count: number
+        }
+        Insert: {
+          column_name: string
+          created_at?: string
+          file_name: string
+          file_type: string
+          id?: string
+          metadata: Json
+          raw_data: Json
+          row_count: number
+        }
+        Update: {
+          column_name?: string
+          created_at?: string
+          file_name?: string
+          file_type?: string
+          id?: string
+          metadata?: Json
+          raw_data?: Json
+          row_count?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -3,11 +3,13 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import { Upload, AlertCircle, FileSpreadsheet, CheckCircle2, Loader2 } from 'lucide-react';
+import { Upload, AlertCircle, FileSpreadsheet, CheckCircle2, Loader2, Share2 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { Progress } from '@/components/ui/progress';
 import { createWorkerBlob, processDataInWorker, WorkerResult } from '@/utils/WorkerCode';
+import { supabase } from '@/integrations/supabase/client';
+import { useNavigate } from 'react-router-dom';
 
 // Definição da interface com a estrutura esperada de dados processados
 export interface ProcessedData {
@@ -23,7 +25,7 @@ export interface ProcessedData {
 }
 
 interface FileUploaderProps {
-  onFileUpload: (data: ProcessedData, columnName: string) => void;
+  onFileUpload: (data: ProcessedData, columnName: string, fileName?: string, fileType?: string) => void;
 }
 
 const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
@@ -34,6 +36,8 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
   const { toast } = useToast();
   const targetColumn = "Codigo da Ultima Ocorrencia"; // Coluna sem acentos
   const abortControllerRef = useRef<AbortController | null>(null);
+  const navigate = useNavigate();
+  const currentFileRef = useRef<{ name: string; type: string } | null>(null);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -141,6 +145,12 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
       });
       return;
     }
+
+    // Armazenar informações do arquivo
+    currentFileRef.current = {
+      name: file.name,
+      type: fileExt
+    };
 
     setIsLoading(true);
     setUploadProgress(10); // Inicia o progresso
@@ -517,7 +527,11 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
       };
       
       console.log(`[DEBUG] Dados processados enviados para componente pai`);
-      onFileUpload(processedData, columnName);
+      
+      // Salvar no Supabase
+      await saveToSupabase(processedData, columnName);
+      
+      onFileUpload(processedData, columnName, currentFileRef.current?.name, currentFileRef.current?.type);
     } catch (error) {
       if (error instanceof Error && error.message === 'Processing aborted') {
         throw error; // Re-throw para ser tratado acima
@@ -529,6 +543,65 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
         description: error instanceof Error ? error.message : "Ocorreu um erro durante o processamento",
         variant: "destructive",
       });
+    }
+  };
+
+  // Função para salvar dados no Supabase
+  const saveToSupabase = async (data: ProcessedData, columnName: string) => {
+    try {
+      setProcessingText('Salvando dados...');
+      
+      const { data: insertData, error } = await supabase
+        .from('uploaded_files')
+        .insert({
+          file_name: currentFileRef.current?.name || 'arquivo.csv',
+          file_type: currentFileRef.current?.type || 'csv',
+          column_name: columnName,
+          raw_data: data.full,
+          metadata: data.meta,
+          row_count: data.full.length
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('Erro ao salvar no Supabase:', error);
+        toast({
+          title: "Aviso",
+          description: "Dados processados com sucesso, mas não foi possível salvá-los para compartilhamento.",
+          variant: "default",
+        });
+        return;
+      }
+
+      if (insertData?.id) {
+        // Atualizar URL com o ID do upload
+        const newUrl = `/?upload=${insertData.id}`;
+        window.history.pushState({}, '', newUrl);
+        
+        toast({
+          title: "Dados salvos!",
+          description: "Você pode compartilhar este link para que outros vejam os mesmos dados.",
+          action: (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href);
+                toast({
+                  title: "Link copiado!",
+                  description: "O link foi copiado para a área de transferência.",
+                });
+              }}
+            >
+              <Share2 className="h-4 w-4 mr-2" />
+              Copiar Link
+            </Button>
+          ),
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao salvar no Supabase:', error);
     }
   };
 
