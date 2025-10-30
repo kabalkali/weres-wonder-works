@@ -1,6 +1,21 @@
 import pako from 'pako';
 
 /**
+ * Converte Uint8Array para base64 processando em chunks para evitar stack overflow
+ */
+const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
+  const CHUNK_SIZE = 0x8000; // 32KB chunks
+  let result = '';
+  
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+    result += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  
+  return btoa(result);
+};
+
+/**
  * Comprime dados JSON usando gzip
  * @param data - Dados a serem comprimidos
  * @returns String base64 com dados comprimidos
@@ -9,7 +24,7 @@ export const compressData = (data: any): string => {
   try {
     const jsonString = JSON.stringify(data);
     const compressed = pako.gzip(jsonString);
-    return btoa(String.fromCharCode.apply(null, Array.from(compressed)));
+    return uint8ArrayToBase64(compressed);
   } catch (error) {
     console.error('Erro ao comprimir dados:', error);
     throw new Error('Falha ao comprimir dados para salvamento');
