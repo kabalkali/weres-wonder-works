@@ -26,6 +26,7 @@ import { findRequiredColumns } from '@/utils/columnUtils';
 import UnidadeMetrics from '@/components/UnidadeMetrics';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { decompressData } from '@/utils/compression';
 interface ResultData {
   code: string | number;
   count: number;
@@ -274,6 +275,7 @@ const Index: React.FC = () => {
   const loadFromSupabase = async (uploadId: string) => {
     try {
       setIsLoading(true);
+      console.log('[LOAD] Carregando dados do upload:', uploadId);
       
       const { data, error } = await supabase
         .from('uploaded_files')
@@ -282,7 +284,7 @@ const Index: React.FC = () => {
         .single();
 
       if (error) {
-        console.error('Erro ao carregar do Supabase:', error);
+        console.error('[LOAD] Erro ao carregar do Supabase:', error);
         toast({
           title: "Erro ao carregar dados",
           description: "Não foi possível carregar os dados compartilhados.",
@@ -293,8 +295,36 @@ const Index: React.FC = () => {
       }
 
       if (data) {
-        // Reconstruir ProcessedData exatamente como era (com type assertions)
-        const rawDataArray = data.raw_data as any[];
+        console.log('[LOAD] Dados recebidos:', {
+          fileName: data.file_name,
+          rowCount: data.row_count,
+          hasCompression: (data.metadata as any)?.compressed
+        });
+        
+        let rawDataArray: any[];
+        
+        // Verificar se os dados estão comprimidos
+        const metadata = data.metadata as any;
+        if (metadata?.compressed) {
+          console.log('[LOAD] Dados estão comprimidos, descomprimindo...');
+          try {
+            rawDataArray = decompressData(data.raw_data as string);
+            console.log('[LOAD] Descompressão bem-sucedida. Registros:', rawDataArray.length);
+          } catch (decompError) {
+            console.error('[LOAD] Erro ao descomprimir dados:', decompError);
+            toast({
+              title: "Erro ao descomprimir",
+              description: "Os dados compartilhados estão corrompidos.",
+              variant: "destructive",
+            });
+            setIsLoading(false);
+            return;
+          }
+        } else {
+          console.log('[LOAD] Dados não comprimidos (formato antigo)');
+          rawDataArray = data.raw_data as any[];
+        }
+        
         const metadataObj = data.metadata as ProcessedData['meta'];
         
         const processedData: ProcessedData = {
@@ -306,8 +336,10 @@ const Index: React.FC = () => {
         setCurrentUploadId(uploadId);
         setLoadedFileName(data.file_name);
         
+        console.log('[LOAD] Processamento concluído com sucesso');
+        
         toast({
-          title: "Dados carregados!",
+          title: "✅ Dados carregados!",
           description: `${data.row_count.toLocaleString()} registros carregados de "${data.file_name}".`,
         });
 
@@ -315,10 +347,10 @@ const Index: React.FC = () => {
         processFileData(processedData, data.column_name);
       }
     } catch (error) {
-      console.error('Erro ao carregar do Supabase:', error);
+      console.error('[LOAD] Erro inesperado ao carregar:', error);
       toast({
         title: "Erro",
-        description: "Ocorreu um erro ao carregar os dados.",
+        description: error instanceof Error ? error.message : "Ocorreu um erro ao carregar os dados.",
         variant: "destructive",
       });
     } finally {

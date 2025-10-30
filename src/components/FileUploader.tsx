@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { createWorkerBlob, processDataInWorker, WorkerResult } from '@/utils/WorkerCode';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
+import { compressData, getDataSizeInMB } from '@/utils/compression';
 
 // Definição da interface com a estrutura esperada de dados processados
 export interface ProcessedData {
@@ -546,10 +547,36 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
     }
   };
 
-  // Função para salvar dados no Supabase
-  const saveToSupabase = async (data: ProcessedData, columnName: string) => {
+  // Função para salvar dados no Supabase com compressão e retry
+  const saveToSupabase = async (data: ProcessedData, columnName: string, retryCount = 0) => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 segundo base
+
     try {
-      setProcessingText('Salvando dados...');
+      setProcessingText('Preparando dados para salvamento...');
+      
+      console.log('[SAVE] Iniciando salvamento no Supabase');
+      console.log('[SAVE] Total de registros:', data.full.length);
+      
+      // Calcular tamanho original dos dados
+      const originalSize = getDataSizeInMB(data.full);
+      console.log('[SAVE] Tamanho original dos dados:', originalSize.toFixed(2), 'MB');
+      
+      // Comprimir dados
+      setProcessingText('Comprimindo dados...');
+      let compressedData: string;
+      try {
+        compressedData = compressData(data.full);
+        const compressedSize = getDataSizeInMB(compressedData);
+        console.log('[SAVE] Tamanho comprimido:', compressedSize.toFixed(2), 'MB');
+        console.log('[SAVE] Taxa de compressão:', ((1 - compressedSize / originalSize) * 100).toFixed(1), '%');
+      } catch (compressionError) {
+        console.error('[SAVE] Erro ao comprimir dados:', compressionError);
+        throw new Error('Falha ao comprimir dados. O arquivo pode ser muito grande.');
+      }
+      
+      setProcessingText('Salvando no banco de dados...');
+      console.log('[SAVE] Enviando para Supabase...');
       
       const { data: insertData, error } = await supabase
         .from('uploaded_files')
@@ -557,31 +584,75 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
           file_name: currentFileRef.current?.name || 'arquivo.csv',
           file_type: currentFileRef.current?.type || 'csv',
           column_name: columnName,
-          raw_data: data.full,
-          metadata: data.meta,
+          raw_data: compressedData, // Salvar dados comprimidos
+          metadata: {
+            ...data.meta,
+            compressed: true, // Flag para indicar que os dados estão comprimidos
+            originalSize: originalSize,
+            compressionRatio: (1 - getDataSizeInMB(compressedData) / originalSize)
+          },
           row_count: data.full.length
         })
         .select('id')
         .single();
 
       if (error) {
-        console.error('Erro ao salvar no Supabase:', error);
+        console.error('[SAVE] Erro do Supabase:', error);
+        console.error('[SAVE] Código do erro:', error.code);
+        console.error('[SAVE] Mensagem:', error.message);
+        console.error('[SAVE] Detalhes:', error.details);
+        
+        // Verificar se é um erro temporário que vale a pena tentar novamente
+        const retryableErrors = ['PGRST301', '23505', '08006', '08003'];
+        const isRetryable = retryableErrors.includes(error.code || '') || 
+                           error.message?.includes('timeout') ||
+                           error.message?.includes('network');
+        
+        if (isRetryable && retryCount < MAX_RETRIES) {
+          const delay = RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
+          console.log(`[SAVE] Tentando novamente em ${delay}ms... (tentativa ${retryCount + 1}/${MAX_RETRIES})`);
+          
+          toast({
+            title: "Tentando novamente...",
+            description: `Tentativa ${retryCount + 1} de ${MAX_RETRIES}`,
+            variant: "default",
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return saveToSupabase(data, columnName, retryCount + 1);
+        }
+        
+        // Erro não recuperável
+        let errorMessage = 'Não foi possível salvar os dados para compartilhamento.';
+        
+        if (error.code === '22001') {
+          errorMessage = 'Arquivo muito grande. Tente com um arquivo menor.';
+        } else if (error.code === '23505') {
+          errorMessage = 'Este arquivo já foi carregado anteriormente.';
+        } else if (error.message?.includes('JWT')) {
+          errorMessage = 'Sessão expirada. Recarregue a página.';
+        }
+        
         toast({
-          title: "Aviso",
-          description: "Dados processados com sucesso, mas não foi possível salvá-los para compartilhamento.",
-          variant: "default",
+          title: "Erro ao salvar",
+          description: errorMessage,
+          variant: "destructive",
         });
+        
+        console.error('[SAVE] Salvamento falhou após', retryCount, 'tentativas');
         return;
       }
 
       if (insertData?.id) {
+        console.log('[SAVE] Dados salvos com sucesso! ID:', insertData.id);
+        
         // Atualizar URL com o ID do upload
         const newUrl = `/?upload=${insertData.id}`;
         window.history.pushState({}, '', newUrl);
         
         toast({
-          title: "Dados salvos!",
-          description: "Você pode compartilhar este link para que outros vejam os mesmos dados.",
+          title: "✅ Dados salvos com sucesso!",
+          description: "Compartilhe o link para que outros vejam os mesmos dados.",
           action: (
             <Button
               size="sm"
@@ -599,9 +670,18 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload }) => {
             </Button>
           ),
         });
+        
+        console.log('[SAVE] Link compartilhável:', window.location.href);
       }
     } catch (error) {
-      console.error('Erro ao salvar no Supabase:', error);
+      console.error('[SAVE] Erro inesperado ao salvar:', error);
+      console.error('[SAVE] Stack trace:', error instanceof Error ? error.stack : 'N/A');
+      
+      toast({
+        title: "Erro ao salvar",
+        description: error instanceof Error ? error.message : "Erro desconhecido ao salvar dados",
+        variant: "destructive",
+      });
     }
   };
 
