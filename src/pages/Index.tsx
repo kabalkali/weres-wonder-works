@@ -303,10 +303,13 @@ const Index: React.FC = () => {
         
         let rawDataArray: any[];
         
-        // Verificar se os dados estão comprimidos
+        // Verificar se os dados estão comprimidos (ou se o campo parece um gzip base64 mesmo sem metadata)
         const metadata = data.metadata as any;
-        if (metadata?.compressed) {
-          console.log('[LOAD] Dados estão comprimidos, descomprimindo...');
+        const looksGzipBase64 = typeof data.raw_data === 'string' && (data.raw_data.startsWith('H4sI') || data.raw_data.startsWith('GwgA'));
+        const isCompressed = Boolean(metadata?.compressed) || looksGzipBase64;
+
+        if (isCompressed) {
+          console.log('[LOAD] Dados comprimidos detectados, descomprimindo...');
           try {
             rawDataArray = decompressData(data.raw_data as string);
             console.log('[LOAD] Descompressão bem-sucedida. Registros:', rawDataArray.length);
@@ -322,7 +325,21 @@ const Index: React.FC = () => {
           }
         } else {
           console.log('[LOAD] Dados não comprimidos (formato antigo)');
-          rawDataArray = data.raw_data as any[];
+          if (Array.isArray(data.raw_data)) {
+            rawDataArray = data.raw_data as any[];
+          } else if (typeof data.raw_data === 'object' && data.raw_data !== null) {
+            // Caso raro: objeto único – normalizar para array
+            rawDataArray = [data.raw_data];
+          } else {
+            console.warn('[LOAD] Formato de raw_data inesperado:', typeof data.raw_data);
+            toast({
+              title: "Formato de dados inválido",
+              description: "Não foi possível interpretar os dados compartilhados.",
+              variant: "destructive",
+            });
+            setIsLoading(false);
+            return;
+          }
         }
         
         const metadataObj = data.metadata as ProcessedData['meta'];
